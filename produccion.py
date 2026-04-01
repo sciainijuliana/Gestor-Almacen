@@ -225,7 +225,7 @@ class ProduccionWindow(QWidget):
     def eliminar_materia_prima(self, id_prod):
         conn = conectar()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM produccion_stock WHERE id = ?", (id_prod,))
+        cursor.execute("DELETE FROM materia_prima_stock WHERE id = ?", (id_prod,))
         conn.commit()
         conn.close()
 
