@@ -23,7 +23,8 @@ def inicializar_bd():
     CREATE TABLE IF NOT EXISTS tickets (
         id INTEGER PRIMARY KEY,
         fecha TEXT,
-        total REAL
+        total REAL,
+        metodo_pago TEXT
     )
     ''')
 

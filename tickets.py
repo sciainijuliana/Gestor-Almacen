@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QPushButton, QMessageBox,
-    QTableWidget, QTableWidgetItem, QLabel
+    QTableWidget, QTableWidgetItem, QLabel, QComboBox
 )
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 from PyQt5.QtGui import QTextDocument
@@ -40,6 +40,10 @@ class TicketsWindow(QWidget):
             ["Código", "Nombre", "Cantidad", "Precio unitario", "Monto total", "Acción"]
         )
         layout.addWidget(self.tabla)
+
+        self.combo_pago = QComboBox()
+        self.combo_pago.addItems(["PAGO EFECTIVO", "PAGO VIRTUAL"])
+        layout.addWidget(self.combo_pago)
 
         self.total_label = QLabel("Total: 0")
         layout.addWidget(self.total_label)
@@ -166,12 +170,12 @@ class TicketsWindow(QWidget):
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT p.nombre, SUM(d.cantidad), SUM(d.subtotal)
+            SELECT p.nombre, SUM(d.cantidad), SUM(d.subtotal), t.metodo_pago
             FROM detalle_ticket d
             JOIN productos p ON d.producto_id = p.id
             JOIN tickets t ON d.ticket_id = t.id
             WHERE DATE(t.fecha) = DATE('now', 'localtime')
-            GROUP BY p.nombre
+            GROUP BY p.nombre, t.metodo_pago
         """)
         ventas = cursor.fetchall()
         conn.close()
@@ -179,12 +183,21 @@ class TicketsWindow(QWidget):
         with open(archivo, "w", encoding="utf-8") as f:
             f.write(f"Reporte de ventas - {fecha}\n")
             f.write("="*40 + "\n\n")
-            total_general = 0
-            for nombre, cantidad, total in ventas:
-                f.write(f"{nombre}: {cantidad} unidades - ${total:.2f}\n")
-                total_general += total
+            total_efectivo = 0
+            total_virtual = 0
+            f.write("Ventas por producto y método de pago:\n\n")
+            for nombre, cantidad, subtotal, metodo_pago in ventas:
+                f.write(f"{nombre}: {cantidad} unidades - ${subtotal:.2f} ({metodo_pago})\n")
+                if metodo_pago == "PAGO EFECTIVO":
+                    total_efectivo += subtotal
+                elif metodo_pago == "PAGO VIRTUAL":
+                    total_virtual += subtotal
+
             f.write("\n" + "="*40 + "\n")
-            f.write(f"TOTAL GENERAL DEL DÍA: ${total_general:.2f}\n")
+            f.write(f"TOTAL PAGO EFECTIVO: ${total_efectivo:.2f}\n")
+            f.write(f"TOTAL PAGO VIRTUAL: ${total_virtual:.2f}\n")
+            f.write("="*40 + "\n")
+            f.write(f"TOTAL GENERAL DEL DÍA: ${total_efectivo + total_virtual:.2f}\n")
 
     def guardar_ticket_diario(self):
         escritorio = os.path.join(os.path.expanduser("~"), "Desktop")
@@ -215,9 +228,14 @@ class TicketsWindow(QWidget):
 
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         total = self.total
-        cursor.execute("INSERT INTO tickets (fecha, total) VALUES (?, ?)", (fecha, total))
+        metodo_pago = self.combo_pago.currentText()
+        cursor.execute(
+        "INSERT INTO tickets (fecha, total, metodo_pago) VALUES (?, ?, ?)",
+        (fecha, total, metodo_pago))
         self.ticket_id = cursor.lastrowid
         self.ticket_fecha = fecha
+        self.ticket_metodo_pago = metodo_pago
+        
 
         for p in self.productos_ticket:
             id_producto, codigo, nombre, cantidad, precio_unitario, monto_total, tipo = p
@@ -248,6 +266,7 @@ class TicketsWindow(QWidget):
 
         fecha = self.ticket_fecha
         ticket_id = self.ticket_id
+        metodo_pago = getattr(self, "ticket_metodo_pago", "No especificado")
 
         contenido = f"""
         <html>
@@ -272,6 +291,7 @@ class TicketsWindow(QWidget):
             <h2>Almacén San Vicente</h2>
             <p><b>Fecha:</b> {fecha}</p>
             <p><b>Número de Ticket:</b> {ticket_id}</p>
+            <p><b>Método de pago:</b> {metodo_pago}</p>
             <hr>
             <table>
                 <tr>
