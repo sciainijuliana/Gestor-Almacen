@@ -48,7 +48,7 @@ if __name__ == "__main__":
     inicializar_bd()   
 
     app = QApplication(sys.argv)
-    fuente = QFont("Arial", 20)
+    fuente = QFont("Arial", 18)
     app.setFont(fuente)
     window = MainWindow()
     window.show()

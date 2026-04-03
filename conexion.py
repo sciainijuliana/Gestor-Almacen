@@ -24,7 +24,8 @@ def inicializar_bd():
         id INTEGER PRIMARY KEY,
         fecha TEXT,
         total REAL,
-        metodo_pago TEXT
+        metodo_pago TEXT,
+        estado TEXT DEFAULT 'ACTIVO'
     )
     ''')
 

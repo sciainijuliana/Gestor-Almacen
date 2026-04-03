@@ -267,12 +267,6 @@ class ProduccionWindow(QWidget):
         self.tabla_lista_recetas.setHorizontalHeaderLabels(["Código", "Nombre", "Ver ingredientes", "Eliminar"])
         layout.addWidget(self.tabla_lista_recetas)
 
-        self.combo_tipo = QComboBox()
-        self.combo_tipo.addItems(["unitario", "peso"])
-        layout.addWidget(QLabel("Tipo de producto"))
-        layout.addWidget(self.combo_tipo)
-
-
         self.tab_recetas.setLayout(layout)
         self.cargar_lista_recetas()
 

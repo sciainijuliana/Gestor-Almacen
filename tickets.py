@@ -1,12 +1,12 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QPushButton, QMessageBox,
-    QTableWidget, QTableWidgetItem, QLabel, QComboBox
+    QTableWidget, QTableWidgetItem, QLabel, QComboBox, QInputDialog,QTabWidget
 )
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 from PyQt5.QtGui import QTextDocument
 from conexion import conectar
 from datetime import datetime
-from PyQt5.QtCore import QSizeF 
+from PyQt5.QtCore import QSizeF, QTimer 
 import os
 import sqlite3
 
@@ -18,54 +18,79 @@ class TicketsWindow(QWidget):
         self.setGeometry(250, 250, 1000, 800)
         self.total = 0.0
 
+        self.tabs = QTabWidget()
         layout = QVBoxLayout()
+        layout.addWidget(self.tabs)
+        self.setLayout(layout)
+
+        self.tab_creacion = QWidget()
+        self.tabs.addTab(self.tab_creacion, "Crear Ticket")
+        layout_creacion = QVBoxLayout(self.tab_creacion)
 
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Código del producto")
-        layout.addWidget(self.codigo_input)
-
+        layout_creacion.addWidget(self.codigo_input)
         self.codigo_input.returnPressed.connect(self.agregar_producto)
 
         self.cantidad_input = QLineEdit()
         self.cantidad_input.setPlaceholderText("Cantidad vendida (default 1)")
-        layout.addWidget(self.cantidad_input)
+        layout_creacion.addWidget(self.cantidad_input)
 
         self.agregar_btn = QPushButton("Agregar al ticket")
         self.agregar_btn.clicked.connect(self.agregar_producto)
-        layout.addWidget(self.agregar_btn)
+        layout_creacion.addWidget(self.agregar_btn)
 
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(6)
         self.tabla.setHorizontalHeaderLabels(
             ["Código", "Nombre", "Cantidad", "Precio unitario", "Monto total", "Acción"]
         )
-        layout.addWidget(self.tabla)
+        layout_creacion.addWidget(self.tabla)
 
         self.combo_pago = QComboBox()
         self.combo_pago.addItems(["PAGO EFECTIVO", "PAGO VIRTUAL"])
-        layout.addWidget(self.combo_pago)
+        layout_creacion.addWidget(self.combo_pago)
 
         self.total_label = QLabel("Total: 0")
-        layout.addWidget(self.total_label)
+        layout_creacion.addWidget(self.total_label)
 
         self.finalizar_btn = QPushButton("Finalizar venta")
         self.finalizar_btn.clicked.connect(self.finalizar_ticket)
-        layout.addWidget(self.finalizar_btn)
+        layout_creacion.addWidget(self.finalizar_btn)
 
         self.imprimir_btn = QPushButton("Imprimir ticket")
         self.imprimir_btn.clicked.connect(self.imprimir_ticket)
-        layout.addWidget(self.imprimir_btn)
+        layout_creacion.addWidget(self.imprimir_btn)
 
         self.nueva_venta_btn = QPushButton("Nueva venta")
         self.nueva_venta_btn.clicked.connect(self.nueva_venta)
-        layout.addWidget(self.nueva_venta_btn)
+        layout_creacion.addWidget(self.nueva_venta_btn)
 
-        self.setLayout(layout)
+        self.btn_eliminar_ticket = QPushButton("Eliminar ticket")
+        self.btn_eliminar_ticket.clicked.connect(self.on_eliminar_ticket)
+        layout_creacion.addWidget(self.btn_eliminar_ticket)
+
+        self.tab_listado = QWidget()
+        self.tabs.addTab(self.tab_listado, "Tickets del día")
+        layout_listado = QVBoxLayout(self.tab_listado)
+
+        self.tabla_tickets_dia = QTableWidget()
+        self.tabla_tickets_dia.setColumnCount(4)
+        self.tabla_tickets_dia.setHorizontalHeaderLabels(
+            ["Ticket", "Método de pago", "Estado", "Acción"]
+        )
+        layout_listado.addWidget(self.tabla_tickets_dia)
+
+        self.tabs.currentChanged.connect(self.cargar_tickets_dia)
 
         self.productos_ticket = []
-
         self.ticket_id = None
         self.ticket_fecha = None
+        self.ultima_fecha = datetime.now().strftime("%Y-%m-%d")
+
+        self.timer_reset = QTimer(self)
+        self.timer_reset.timeout.connect(self.verificar_reset_diario)
+        self.timer_reset.start(60000)
 
     def actualizar_total(self):
         total = 0.0
@@ -175,8 +200,10 @@ class TicketsWindow(QWidget):
             JOIN productos p ON d.producto_id = p.id
             JOIN tickets t ON d.ticket_id = t.id
             WHERE DATE(t.fecha) = DATE('now', 'localtime')
+            AND t.estado = 'ACTIVO'
             GROUP BY p.nombre, t.metodo_pago
         """)
+
         ventas = cursor.fetchall()
         conn.close()
 
@@ -230,8 +257,9 @@ class TicketsWindow(QWidget):
         total = self.total
         metodo_pago = self.combo_pago.currentText()
         cursor.execute(
-        "INSERT INTO tickets (fecha, total, metodo_pago) VALUES (?, ?, ?)",
-        (fecha, total, metodo_pago))
+            "INSERT INTO tickets (fecha, total, metodo_pago, estado) VALUES (?, ?, ?, ?)",
+            (fecha, total, metodo_pago, "ACTIVO")
+        )
         self.ticket_id = cursor.lastrowid
         self.ticket_fecha = fecha
         self.ticket_metodo_pago = metodo_pago
@@ -257,7 +285,44 @@ class TicketsWindow(QWidget):
         self.guardar_ticket_diario()
 
         QMessageBox.information(self, "Éxito", "Ticket finalizado correctamente")
-        self.imprimir_ticket()
+
+    def eliminar_ticket(self, ticket_id):
+        conn = conectar()
+        cursor = conn.cursor()
+
+        motivo, ok = QInputDialog.getText(self, "Eliminar ticket", "Ingrese motivo de eliminación:")
+        if not ok or motivo.strip() == "":
+            return
+
+        cursor.execute("SELECT producto_id, cantidad FROM detalle_ticket WHERE ticket_id = ?", (ticket_id,))
+        detalles = cursor.fetchall()
+        for producto_id, cantidad in detalles:
+            cursor.execute("UPDATE productos SET stock = stock + ? WHERE id = ?", (cantidad, producto_id))
+
+        cursor.execute("UPDATE tickets SET estado = 'ELIMINADO' WHERE id = ?", (ticket_id,))
+
+        conn.commit()
+        conn.close()
+
+        from datetime import datetime
+        fecha = datetime.now().strftime("%Y-%m-%d")
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        carpeta_tickets = os.path.join(desktop, "Ventas diarias por Ticket", fecha)
+        archivo_ticket = os.path.join(carpeta_tickets, f"ticket_{ticket_id}.txt")
+
+        if os.path.exists(archivo_ticket):
+            with open(archivo_ticket, "a", encoding="utf-8") as f:
+                f.write(f"\nELIMINADO - Motivo: {motivo}\n")
+
+        QMessageBox.information(self, "Eliminado", f"Ticket {ticket_id} eliminado correctamente")
+
+    def on_eliminar_ticket(self):
+        if not self.ticket_id:
+            QMessageBox.warning(self, "Error", "Debe seleccionar un ticket finalizado para eliminar")
+            return
+        self.eliminar_ticket(self.ticket_id)
+
+
 
     def imprimir_ticket(self):
         if not self.ticket_id:
@@ -371,3 +436,63 @@ class TicketsWindow(QWidget):
         self.imprimir_btn.setEnabled(True)
         self.tabla.setEnabled(True)
 
+    def cargar_tickets_dia(self, index):
+            # Solo recargar si estamos en la pestaña de listado
+            if self.tabs.tabText(index) != "Tickets del día":
+                return
+
+            conn = sqlite3.connect("almacen.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, metodo_pago, estado
+                FROM tickets
+                WHERE DATE(fecha) = DATE('now', 'localtime')
+            """)
+            tickets = cursor.fetchall()
+            conn.close()
+
+            self.tabla_tickets_dia.setRowCount(0)
+            for row, (id, metodo_pago, estado) in enumerate(tickets):
+                self.tabla_tickets_dia.insertRow(row)
+                self.tabla_tickets_dia.setItem(row, 0, QTableWidgetItem(str(id)))
+                self.tabla_tickets_dia.setItem(row, 1, QTableWidgetItem(metodo_pago))
+                self.tabla_tickets_dia.setItem(row, 2, QTableWidgetItem(estado))
+
+                btn_detalle = QPushButton("Ver detalle")
+                btn_detalle.clicked.connect(lambda _, tid=id: self.ver_detalle_ticket(tid))
+                self.tabla_tickets_dia.setCellWidget(row, 3, btn_detalle)
+
+    def ver_detalle_ticket(self, ticket_id):
+        conn = sqlite3.connect("almacen.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.nombre, d.cantidad, d.subtotal, d.tipo
+            FROM detalle_ticket d
+            JOIN productos p ON d.producto_id = p.id
+            WHERE d.ticket_id = ?
+        """, (ticket_id,))
+        productos = cursor.fetchall()
+        conn.close()
+
+        detalle = f"Ticket N° {ticket_id}\n\nProductos:\n"
+        total_ticket = 0
+        for nombre, cantidad, subtotal, tipo in productos:
+            detalle += f"{nombre} - Cantidad: {cantidad}\n"
+            detalle += f"Subtotal: ${subtotal:.2f}\n\n"
+            total_ticket += subtotal
+
+        detalle += f"TOTAL DEL TICKET: ${total_ticket:.2f}"
+
+        QMessageBox.information(self, "Detalle del ticket", detalle)
+
+    def verificar_reset_diario(self):
+        hoy = datetime.now().strftime("%Y-%m-%d")
+        if self.ultima_fecha != hoy:
+            self.resetear_interfaz_diaria()
+            self.ultima_fecha = hoy
+
+    def resetear_interfaz_diaria(self):
+        self.tabla_produccion.setRowCount(0)
+        self.tabla_ingresar_producto.setRowCount(0)
+        self.tabla_tickets_dia.setRowCount(0)
+        QMessageBox.information(self, "Reset diario", "Se ha iniciado un nuevo día. La interfaz de producción se ha limpiado.")
